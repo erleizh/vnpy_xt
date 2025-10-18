@@ -624,7 +624,7 @@ class XtTdApi(XtQuantTraderCallback):
 
         # 尝试重连，重连需要更换session_id
         session: int = int(float(datetime.now().strftime("%H%M%S.%f")) * 1000)
-        connect_result: int = self.connect(self.path, self.accountid, self.account_type, session)
+        connect_result: int = self.connect(self.path, self.account_id, self.account_type, session)
 
         if connect_result:
             self.gateway.write_log("交易接口重连失败")
