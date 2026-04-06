@@ -66,8 +66,8 @@ class XtDatafeed(BaseDatafeed):
 
         try:
             # 使用Token连接，无需启动客户端
-            if self.username != "client":
-                self.init_xtdc()
+            # if self.username != "client":
+                # self.init_xtdc()
 
             # 尝试查询合约信息，确认连接成功
             xtdata.get_instrument_detail("000001.SZ")

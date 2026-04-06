@@ -98,8 +98,8 @@ DIRECTION_VT2XT: dict[tuple, str] = {
 DIRECTION_XT2VT: dict[str, tuple] = {v: k for k, v in DIRECTION_VT2XT.items()}
 
 POSDIRECTION_XT2VT: dict[int, Direction] = {
-    xtconstant.DIRECTION_FLAG_BUY: Direction.LONG,
-    xtconstant.DIRECTION_FLAG_SELL: Direction.SHORT
+    xtconstant.STOCK_BUY: Direction.LONG,
+    xtconstant.STOCK_SELL: Direction.SHORT
 }
 
 # 委托类型映射
@@ -174,7 +174,7 @@ class XtGateway(BaseGateway):
 
         self.trading = setting["仿真交易"] == "是"
         if self.trading:
-            path: str = setting["QMT路径"] + "\\userdata"
+            path: str = setting["QMT路径"] + "\\userdata_mini"
 
             accountid: str = setting["资金账号"]
 
@@ -359,7 +359,7 @@ class XtMdApi:
             return
 
         try:
-            self.init_xtdc()
+            # self.init_xtdc()
 
             # 尝试查询合约信息，确认连接成功
             xtdata.get_instrument_detail("000001.SZ")
@@ -952,17 +952,12 @@ def generate_datetime(timestamp: int, millisecond: bool = True) -> datetime:
 
 def process_etf_option(get_instrument_detail: Callable, xt_symbol: str, gateway_name: str) -> ContractData | None:
     """处理ETF期权"""
-    # 拆分XT代码
     symbol, xt_exchange = xt_symbol.split(".")
-
-    # 筛选期权合约合约（ETF期权代码为8位）
     if len(symbol) != 8:
         return None
 
-    # 查询转换数据
-    data: dict = get_instrument_detail(xt_symbol, True)
-
-    name: str = data["InstrumentName"]
+    data = get_instrument_detail(xt_symbol, True)
+    name = data["InstrumentName"]
     if "购" in name:
         option_type = OptionType.CALL
     elif "沽" in name:
@@ -970,73 +965,59 @@ def process_etf_option(get_instrument_detail: Callable, xt_symbol: str, gateway_
     else:
         return None
 
-    if "A" in name:
-        option_index = str(data["OptExercisePrice"]) + "-A"
-    else:
-        option_index = str(data["OptExercisePrice"]) + "-M"
+    ext = data.get("ExtendInfo", {})
+    strike = ext.get("OptExercisePrice") or data.get("OptExercisePrice")
+    if not strike:
+        return None
 
-    contract: ContractData = ContractData(
+    # 期权索引（A类美式 / M类欧式）
+    suffix = "-A" if "A" in name else "-M"
+    option_index = f"{strike}{suffix}"
+
+    contract = ContractData(
         symbol=data["InstrumentID"],
         exchange=EXCHANGE_XT2VT[xt_exchange],
-        name=data["InstrumentName"],
+        name=name,
         product=Product.OPTION,
         size=data["VolumeMultiple"],
         pricetick=data["PriceTick"],
         min_volume=data["MinLimitOrderVolume"],
-        option_strike=data["OptExercisePrice"],
+        option_strike=float(strike),
         option_listed=datetime.strptime(data["OpenDate"], "%Y%m%d"),
         option_expiry=datetime.strptime(data["ExpireDate"], "%Y%m%d"),
-        option_portfolio=data["OptUndlCode"] + "_O",
+        option_portfolio=f"{ext.get('OptUndlCode', '')}_O",
         option_index=option_index,
         option_type=option_type,
-        option_underlying=data["OptUndlCode"] + "-" + str(data["ExpireDate"])[:6],
-        gateway_name=gateway_name
+        option_underlying=f"{ext.get('OptUndlCode', '')}-{data['ExpireDate'][:6]}",
+        gateway_name=gateway_name,
     )
-
     symbol_limit_map[contract.vt_symbol] = (data["UpStopPrice"], data["DownStopPrice"])
-
     return contract
 
 
 def process_futures_option(get_instrument_detail: Callable, xt_symbol: str, gateway_name: str) -> ContractData | None:
     """处理期货期权"""
-    # 筛选期权合约
-    data: dict = get_instrument_detail(xt_symbol, True)
-
-    option_strike: float = data["OptExercisePrice"]
-    if not option_strike:
+    data = get_instrument_detail(xt_symbol, True)
+    strike = data.get("OptExercisePrice") or data.get("ExtendInfo", {}).get("OptExercisePrice")
+    if not strike:
         return None
 
-    # 拆分XT代码
     symbol, xt_exchange = xt_symbol.split(".")
-
-    # 移除产品前缀
-    for _ix, w in enumerate(symbol):
-        if w.isdigit():
-            break
-
-    suffix: str = symbol[_ix:]
-
-    # 过滤非期权合约
     if "(" in symbol or " " in symbol:
         return None
 
-    # 判断期权类型
-    if "C" in suffix:
+    # 判断C/P类型
+    if "C" in symbol.upper():
         option_type = OptionType.CALL
-    elif "P" in suffix:
+    elif "P" in symbol.upper():
         option_type = OptionType.PUT
     else:
         return None
 
-    # 获取期权标的
-    if "-" in symbol:
-        option_underlying: str = symbol.split("-")[0]
-    else:
-        option_underlying = data["OptUndlCode"]
+    # 标的代码
+    underlying = data.get("OptUndlCode") or symbol.split("-")[0] if "-" in symbol else symbol
 
-    # 转换数据
-    contract: ContractData = ContractData(
+    contract = ContractData(
         symbol=data["InstrumentID"],
         exchange=EXCHANGE_XT2VT[xt_exchange],
         name=data["InstrumentName"],
@@ -1044,20 +1025,18 @@ def process_futures_option(get_instrument_detail: Callable, xt_symbol: str, gate
         size=data["VolumeMultiple"],
         pricetick=data["PriceTick"],
         min_volume=data["MinLimitOrderVolume"],
-        option_strike=data["OptExercisePrice"],
+        option_strike=float(strike),
         option_listed=datetime.strptime(data["OpenDate"], "%Y%m%d"),
         option_expiry=datetime.strptime(data["ExpireDate"], "%Y%m%d"),
-        option_index=str(data["OptExercisePrice"]),
+        option_index=str(strike),
         option_type=option_type,
-        option_underlying=option_underlying,
-        gateway_name=gateway_name
+        option_underlying=underlying,
+        gateway_name=gateway_name,
     )
 
-    if contract.exchange == Exchange.CZCE:
-        contract.option_portfolio = data["ProductID"][:-1]
-    else:
-        contract.option_portfolio = data["ProductID"]
+    # 投资组合代码处理
+    product_id = data["ProductID"]
+    contract.option_portfolio = product_id[:-1] if contract.exchange == Exchange.CZCE else product_id
 
     symbol_limit_map[contract.vt_symbol] = (data["UpStopPrice"], data["DownStopPrice"])
-
     return contract
