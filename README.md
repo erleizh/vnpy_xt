@@ -40,7 +40,7 @@ pip install .
 
 **客户端连接**
 
-1. 连接请先券商版miniQMT，同时确保xtquant模块可以正常加载（点击【下载Python库】-【Python库下载】，下载完成后拷贝“Python库路径”下Lib\site-packages文件夹中的xtquant包到自己使用的Python环境的site_packages文件夹下）。
+1. 连接请先登录券商版miniQMT，同时确保xtquant模块可以正常加载（点击【下载Python库】-【Python库下载】，下载完成后拷贝“Python库路径”下Lib\site-packages文件夹中的xtquant包到自己使用的Python环境的site_packages文件夹下）。
 2. 在Veighna Trader的【全局配置】处进行数据服务配置：
     * datafeed.name：xt
     * datafeed.username：client
